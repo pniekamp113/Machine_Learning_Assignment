@@ -1,0 +1,150 @@
+---
+title: "Assignment Machine Learning"
+author: "Patrick"
+date: "2024-11-10"
+output: html_document
+---
+
+
+## Summary
+### The goal of this project was to predict the manner in which the participants did the exercise.A training set was used to train different model.
+### The best model with the highest accuracy was a combined model of a "random forest" and a "gradient boosting".
+### The model was applied on the testing set to determine in what manner the participants did the exercise. 
+
+```{r setup, include=FALSE}
+
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(rpart)
+library(rattle)
+
+
+```
+
+### Load and clean data:
+
+```{r}
+
+training_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testing_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(training_url, header=TRUE)
+testing <- read.csv(testing_url, header = TRUE)
+dim(training) ; dim(testing)
+training$classe <- as.factor(training$classe) #change classe variable to factor
+
+#clean up
+#sum(is.na(training))
+training_old <- training
+
+#Filter out all columns that have NAs
+training <- select(training, - which(is.na(training[1,])))
+#sum(is.na(training)) #no more NAs in training set
+
+#process testing data set by removing all NAs
+testing <- select(testing, - which(is.na(training_old[1,])) )
+#sum(is.na(testing))
+testing <- select(testing, - which(is.na(testing[1,])))
+#names(testing) #this leaves 60 variables for our model
+
+#now we apply this selection to the training set
+training <- training[, intersect(names(training), names(testing))]
+training$classe <- training_old$classe
+testing <- testing[, intersect(names(training), names(testing))]
+#dim(training)
+#dim(testing)
+
+training <- select(training,-X,  - user_name,-raw_timestamp_part_1,-raw_timestamp_part_2,-cvtd_timestamp,-num_window, -new_window )
+testing <- select(testing,-X,  - user_name,-raw_timestamp_part_1,-raw_timestamp_part_2,-cvtd_timestamp,-num_window, -new_window )
+
+print(dim(training))
+print(dim(testing))
+
+#this leaves 53 columns for training and 52 for testing
+
+```
+
+### After the removal of NAs and unnecessary varibales, we have 53 columns for the training set and 52 columns (no classe column) for the testing set.
+
+### Next, we need to partition the training data set to generate a validation test set.
+```{r}
+set.seed(123)
+inTrain <- createDataPartition(y = training$classe, p = 0.75, list = FALSE)
+training <- training[inTrain,]
+validation <- training[-inTrain,]
+dim(training); dim(validation)
+```
+
+### Now, we will test two different models: "Random Forest" and "Gradient Boosting". 
+### Additionally, we will create "Recursive Partitioning and Regression Trees" using "rpart".
+### To reduce computational requirements, we will subset the training and validation sets to a random subset of 1,000 columns instead of the total of 14,718 and 3699, repectively. 
+
+
+```{r models}
+train_ex <- training[abs(runif(1000, 1, length(training[,1]))),]
+validation_ex<- validation[abs(runif(1000,1,length(validation[,1]))),]
+
+rpart <- rpart(classe~., data = train_ex, method = "class")
+fancyRpartPlot(rpart, main="Decision Tree", sub="", cex = 0.6 )
+
+rf <- train(classe ~ ., data=train_ex, method = "rf", prox=TRUE)
+pred_rf <- predict(rf, validation_ex)
+Accuracy_rf <- confusionMatrix(pred_rf, validation_ex$classe)$overall["Accuracy"]
+#print(Accuracy_rf)
+
+gbm <- train(classe ~ ., data=train_ex, method="gbm", verbose=FALSE)
+pred_gbm <- predict(gbm, validation_ex)
+Accuracy_gbm <- confusionMatrix(pred_gbm, validation_ex$classe)$overall["Accuracy"]
+#print(Accuracy_gbm)
+
+predDF <- data.frame(pred_rf, pred_gbm, validation_ex$classe)
+combModFit <- train(validation_ex.classe ~., method = "rf", data = predDF)
+combPred <- predict(combModFit, predDF)
+Accuracy_all <- confusionMatrix(combPred, validation_ex$classe)$overall["Accuracy"]
+#print(Accuracy_all)
+
+
+```
+### The accuracy of the two models and the combined model is:
+
+```{r}
+paste("Random Forest: ",Accuracy_rf)
+paste("Gradient Boosting: ", Accuracy_gbm)
+paste("Combined Model: ", Accuracy_all )
+
+```
+
+### Therefore, the combined model shows the highest accuracy and will be used on the testing set.
+### The out of sample error is:
+
+```{r}
+# What is the out of sample error?
+out_of_sample_error <- 1 - Accuracy_all
+paste("Out of sample error is: ", out_of_sample_error)
+
+```
+
+### Using the combined model on the testing data set:
+
+```{r}
+pred_rf_test <- predict(rf, testing)
+pred_gbm_test <- predict(gbm, testing)
+
+predDF_test <- data.frame(pred_rf = pred_rf_test, pred_gbm = pred_gbm_test)
+head(predDF_test)
+
+classe_predictions <- predict(combModFit, predDF_test)
+print(classe_predictions)
+
+writeFiles = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+writeFiles(classe_predictions)
+
+```
+
